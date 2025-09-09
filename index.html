@@ -62,7 +62,7 @@ async function findRunForCommit(owner, repo, commitSha, pat){
     log(`Searching for run for commit ${commitSha} (try ${i+1})...`);
     const j = await listRuns(owner, repo, pat);
     if(j.workflow_runs){ const found = j.workflow_runs.find(run => run.head_sha===commitSha); if(found) return found; }
-    await new Promise(s=>setTimeout(s,5000));
+    await new Promise(s=>setTimeout(s,10000));
   }
   throw new Error('Timeout waiting for workflow run to appear.');
 }
@@ -73,7 +73,7 @@ async function waitForRunComplete(owner, repo, runId, pat){
     const j = await r.json();
     log(`Run ${runId} status=${j.status} conclusion=${j.conclusion}`);
     if(j.status==='completed') return j;
-    await new Promise(s=>setTimeout(s,10000));
+    await new Promise(s=>setTimeout(s,5000));
   }
   throw new Error('Timeout waiting for run completion.');
 }
