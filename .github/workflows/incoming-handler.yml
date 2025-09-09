@@ -12,28 +12,25 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0   # Important: get full history for proper git push
 
       - name: Find oldest incoming file
         id: find
         run: |
-          # List incoming/*.txt in repo
-          files=$(find incoming -maxdepth 1 -type f -name '*.txt' | sort)
-          if [ -z "$files" ]; then
-            echo "files=" >> "$GITHUB_OUTPUT"
+          # List all incoming/*.txt files sorted by creation date
+          oldest_file=$(ls -1t incoming/*.txt 2>/dev/null | tail -n1)
+          if [ -z "$oldest_file" ]; then
             echo "No incoming files found."
+            echo "file_to_process=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          echo "Processing oldest file: $oldest_file"
+          echo "file_to_process=$oldest_file" >> "$GITHUB_OUTPUT"
 
-          # Pick the oldest file
-          oldest=$(echo "$files" | head -n1)
-          echo "Processing oldest file: $oldest"
-          echo "files=$oldest" >> "$GITHUB_OUTPUT"
-
-      - name: Create output for oldest file
-        if: steps.find.outputs.files != ''
+      - name: Process oldest file
+        if: steps.find.outputs.file_to_process != ''
         run: |
-          f="${{ steps.find.outputs.files }}"
-          echo "Processing $f"
+          f="${{ steps.find.outputs.file_to_process }}"
           uuid=$(basename "$f" .txt)
           url=$(tr -d '\r' < "$f")
           mkdir -p output
@@ -48,24 +45,23 @@ jobs:
             "Processed: $(date)" \
             "" \
             "----------------------------------" \
-            > "${out}"
-          echo "Created ${out}"
+            > "$out"
+          echo "Created $out"
 
       - name: Upload output as artifact
-        if: steps.find.outputs.files != ''
+        if: steps.find.outputs.file_to_process != ''
         uses: actions/upload-artifact@v4
         with:
           name: outputs
           path: output/
 
-      - name: Delete processed file
-        if: steps.find.outputs.files != ''
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Delete processed file and push
+        if: steps.find.outputs.file_to_process != ''
         run: |
-          f="${{ steps.find.outputs.files }}"
+          f="${{ steps.find.outputs.file_to_process }}"
           git config user.email "actions@github.com"
           git config user.name "github-actions[bot]"
           git rm -f "$f"
-          git commit -m "Remove processed file ${f}" || echo "nothing to commit"
-          git push origin HEAD || echo "push failed"
+          git commit -m "Remove processed file $f" || echo "nothing to commit"
+          # Push explicitly to main using GITHUB_TOKEN
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} HEAD:main
