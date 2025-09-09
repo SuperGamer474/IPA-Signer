@@ -1,0 +1,72 @@
+name: incoming-handler
+on:
+  push:
+    paths:
+      - 'incoming/**'
+
+jobs:
+  handle-incoming:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Find added incoming files
+        id: find
+        run: |
+          # Get list of files added in the head commit that match incoming/*.txt
+          jq -r '.head_commit.added[]? | select(test("^incoming/.*\\.txt$"))' "$GITHUB_EVENT_PATH" > added_files.txt || true
+          if [ ! -s added_files.txt ]; then
+            echo "files=" >> "$GITHUB_OUTPUT"
+            echo "No incoming files found."
+            exit 0
+          fi
+          files=$(paste -sd "," added_files.txt)
+          echo "files=${files}" >> "$GITHUB_OUTPUT"
+          echo "Found incoming files:"
+          cat added_files.txt
+
+      - name: Create outputs from incoming files
+        if: steps.find.outputs.files != ''
+        run: |
+          mkdir -p output
+          while IFS= read -r f; do
+            echo "Processing $f"
+            uuid=$(basename "$f" .txt)
+            # read the URL from the file (strip CRs/newlines)
+            url=$(tr -d '\r' < "$f")
+            out="output/${uuid}-output.txt"
+            cat > "$out" <<EOF
+----------------------------------
+Test File to Test Github Actions
+----------------------------------
+
+URL: $url
+UUID: $uuid
+
+----------------------------------
+EOF
+            echo "Created $out"
+          done < added_files.txt
+
+      - name: Upload outputs as artifact
+        if: steps.find.outputs.files != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: outputs
+          path: output/
+
+      - name: Remove incoming files and push deletion commit
+        if: steps.find.outputs.files != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          while IFS= read -r f; do
+            git rm -f "$f" || true
+          done < added_files.txt
+          git commit -m "remove incoming files for ${GITHUB_SHA}" || echo "nothing to commit"
+          git push origin HEAD || echo "push failed"
