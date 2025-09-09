@@ -64,4 +64,4 @@ jobs:
           git rm -f "$f"
           git commit -m "Remove processed file $f" || echo "nothing to commit"
           # Push explicitly to main using GITHUB_TOKEN
-          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} HEAD:main
+          git push https://x-access-token:${{ secrets.PAT_FOR_ACTIONS }}@github.com/${{ github.repository }} HEAD:main
