@@ -38,17 +38,20 @@ jobs:
             # read the URL from the file (strip CRs/newlines)
             url=$(tr -d '\r' < "$f")
             out="output/${uuid}-output.txt"
-            cat > "$out" <<EOF
-----------------------------------
-Test File to Test Github Actions
-----------------------------------
 
-URL: $url
-UUID: $uuid
+            # write content safely without using a heredoc
+            printf "%s\n" \
+              "----------------------------------" \
+              "Test File to Test Github Actions" \
+              "----------------------------------" \
+              "" \
+              "URL: ${url}" \
+              "UUID: ${uuid}" \
+              "" \
+              "----------------------------------" \
+              > "${out}"
 
-----------------------------------
-EOF
-            echo "Created $out"
+            echo "Created ${out}"
           done < added_files.txt
 
       - name: Upload outputs as artifact
