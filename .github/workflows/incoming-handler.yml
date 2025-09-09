@@ -13,19 +13,41 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Find added incoming files
+      - name: Debug - show event payload (for troubleshooting)
+        run: |
+          echo "===== GITHUB_EVENT_PATH ====="
+          cat "$GITHUB_EVENT_PATH" || true
+          echo "============================="
+
+      - name: Find incoming files (added in commit OR present in repo)
         id: find
         run: |
-          # Get list of files added in the head commit that match incoming/*.txt
+          # Try to detect added incoming/*.txt from head_commit.added
           jq -r '.head_commit.added[]? | select(test("^incoming/.*\\.txt$"))' "$GITHUB_EVENT_PATH" > added_files.txt || true
+
+          if [ -s added_files.txt ]; then
+            echo "Found incoming files in head_commit.added:"
+            cat added_files.txt
+          else
+            echo "No entries in head_commit.added. Falling back to scanning repo for incoming/*.txt"
+            # Use find to list files actually present in the repo under incoming/
+            # (safe even if no files exist)
+            find incoming -maxdepth 1 -type f -name '*.txt' -print > added_files.txt || true
+            if [ -s added_files.txt ]; then
+              echo "Found incoming files present in repo:"
+              cat added_files.txt
+            fi
+          fi
+
           if [ ! -s added_files.txt ]; then
             echo "files=" >> "$GITHUB_OUTPUT"
             echo "No incoming files found."
             exit 0
           fi
+
           files=$(paste -sd "," added_files.txt)
           echo "files=${files}" >> "$GITHUB_OUTPUT"
-          echo "Found incoming files:"
+          echo "WILL PROCESS:"
           cat added_files.txt
 
       - name: Create outputs from incoming files
@@ -35,7 +57,7 @@ jobs:
           while IFS= read -r f; do
             echo "Processing $f"
             uuid=$(basename "$f" .txt)
-            # read the URL from the file (strip CRs/newlines)
+            # Safely read URL contents (strip CR)
             url=$(tr -d '\r' < "$f")
             out="output/${uuid}-output.txt"
 
