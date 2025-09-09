@@ -5,7 +5,7 @@ on:
       - 'incoming/**'
 
 jobs:
-  handle-incoming:
+  handle-oldest-incoming:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -13,85 +13,59 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Debug - show event payload (for troubleshooting)
-        run: |
-          echo "===== GITHUB_EVENT_PATH ====="
-          cat "$GITHUB_EVENT_PATH" || true
-          echo "============================="
-
-      - name: Find incoming files (added in commit OR present in repo)
+      - name: Find oldest incoming file
         id: find
         run: |
-          # Try to detect added incoming/*.txt from head_commit.added
-          jq -r '.head_commit.added[]? | select(test("^incoming/.*\\.txt$"))' "$GITHUB_EVENT_PATH" > added_files.txt || true
-
-          if [ -s added_files.txt ]; then
-            echo "Found incoming files in head_commit.added:"
-            cat added_files.txt
-          else
-            echo "No entries in head_commit.added. Falling back to scanning repo for incoming/*.txt"
-            # Use find to list files actually present in the repo under incoming/
-            # (safe even if no files exist)
-            find incoming -maxdepth 1 -type f -name '*.txt' -print > added_files.txt || true
-            if [ -s added_files.txt ]; then
-              echo "Found incoming files present in repo:"
-              cat added_files.txt
-            fi
-          fi
-
-          if [ ! -s added_files.txt ]; then
+          # List incoming/*.txt in repo
+          files=$(find incoming -maxdepth 1 -type f -name '*.txt' | sort)
+          if [ -z "$files" ]; then
             echo "files=" >> "$GITHUB_OUTPUT"
             echo "No incoming files found."
             exit 0
           fi
 
-          files=$(paste -sd "," added_files.txt)
-          echo "files=${files}" >> "$GITHUB_OUTPUT"
-          echo "WILL PROCESS:"
-          cat added_files.txt
+          # Pick the oldest file
+          oldest=$(echo "$files" | head -n1)
+          echo "Processing oldest file: $oldest"
+          echo "files=$oldest" >> "$GITHUB_OUTPUT"
 
-      - name: Create outputs from incoming files
+      - name: Create output for oldest file
         if: steps.find.outputs.files != ''
         run: |
+          f="${{ steps.find.outputs.files }}"
+          echo "Processing $f"
+          uuid=$(basename "$f" .txt)
+          url=$(tr -d '\r' < "$f")
           mkdir -p output
-          while IFS= read -r f; do
-            echo "Processing $f"
-            uuid=$(basename "$f" .txt)
-            # Safely read URL contents (strip CR)
-            url=$(tr -d '\r' < "$f")
-            out="output/${uuid}-output.txt"
+          out="output/${uuid}-output.txt"
+          printf "%s\n" \
+            "----------------------------------" \
+            "IPA Processing Complete" \
+            "----------------------------------" \
+            "" \
+            "Original URL: ${url}" \
+            "UUID: ${uuid}" \
+            "Processed: $(date)" \
+            "" \
+            "----------------------------------" \
+            > "${out}"
+          echo "Created ${out}"
 
-            # write content safely without using a heredoc
-            printf "%s\n" \
-              "----------------------------------" \
-              "Test File to Test Github Actions" \
-              "----------------------------------" \
-              "" \
-              "URL: ${url}" \
-              "UUID: ${uuid}" \
-              "" \
-              "----------------------------------" \
-              > "${out}"
-
-            echo "Created ${out}"
-          done < added_files.txt
-
-      - name: Upload outputs as artifact
+      - name: Upload output as artifact
         if: steps.find.outputs.files != ''
         uses: actions/upload-artifact@v4
         with:
           name: outputs
           path: output/
 
-      - name: Remove incoming files and push deletion commit
+      - name: Delete processed file
         if: steps.find.outputs.files != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          f="${{ steps.find.outputs.files }}"
           git config user.email "actions@github.com"
           git config user.name "github-actions[bot]"
-          while IFS= read -r f; do
-            git rm -f "$f" || true
-          done < added_files.txt
-          git commit -m "remove incoming files for ${GITHUB_SHA}" || echo "nothing to commit"
+          git rm -f "$f"
+          git commit -m "Remove processed file ${f}" || echo "nothing to commit"
           git push origin HEAD || echo "push failed"
